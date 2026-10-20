@@ -39,6 +39,19 @@ Persyaratan sama dengan Arkacode: JDK 21, Android SDK 35.
 ./gradlew :app:testDebugUnitTest -p android    # EngineReleaseTest
 ```
 
+### Upgradeable (tanpa uninstall)
+
+Semua build (debug maupun release) **ditandatangani keystore bersama yang
+committed** (`arkacode.keystore`) — tanda tangan identik antar build/mesin, jadi
+APK baru terpasang langsung di atas yang lama: data (distro Alpine, engine
+opencode, password tersimpan) tidak hilang. `versionCode` otomatis dari
+`GITHUB_RUN_NUMBER` di CI; bila membangun manual, angkat manual di
+`app/build.gradle.kts` bila perlu.
+
+Bila keystore berubah, Android akan menolak update — jangan ganti
+`arkacode.keystore`.
+
+
 Bila npm-registry jaringan mati, build tetap berjalan (binary proot dibawa)
 seperti di Arkacode.
 
