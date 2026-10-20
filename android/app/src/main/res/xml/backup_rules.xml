@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- Index FTS bisa dibangun ulang (backfill); jangan ikut backup. -->
+    <exclude domain="file" path="arka_session_index.db" />
+    <exclude domain="file" path="arka_session_index.db-journal" />
+    <exclude domain="file" path="arka_session_index.db-wal" />
+    <!-- Workspace bisa besar + berisi file user (termasuk lampiran biner). -->
+    <exclude domain="file" path="workspace/" />
+    <!-- File temp/backup internal. -->
+    <exclude domain="file" path="proot-tmp/" />
+</full-backup-content>

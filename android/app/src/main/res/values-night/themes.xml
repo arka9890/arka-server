@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Varian night: background window ikut gelap saat tema sistem gelap,
+         agar kilatan terang tidak muncul sebelum Compose menggambar. -->
+    <style name="Theme.Arkacode" parent="android:Theme.Material.NoActionBar" />
+</resources>
