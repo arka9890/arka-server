@@ -55,6 +55,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.arkacode.app.core.EngineConfig
@@ -522,6 +524,7 @@ private fun ColumnScope.SettingsTab(
     )
 
     var portText by remember(port) { mutableStateOf(port.toString()) }
+    var passwordVisible by remember { mutableStateOf(false) }
 
     ClayCard {
         ClaySectionTitle("Akses")
@@ -529,7 +532,16 @@ private fun ColumnScope.SettingsTab(
             value = password,
             onValueChange = onPasswordChange,
             label = { Text("Password server") },
+            supportingText = { Text("Ketik passwordmu sendiri, atau pilih \"Acak kuat\".") },
             singleLine = true,
+            visualTransformation = if (passwordVisible) VisualTransformation.None
+                else PasswordVisualTransformation(),
+            trailingIcon = {
+                TextButton(
+                    onClick = { passwordVisible = !passwordVisible },
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) { Text(if (passwordVisible) "Sembunyikan" else "Tampilkan") }
+            },
             modifier = Modifier.fillMaxWidth(),
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
