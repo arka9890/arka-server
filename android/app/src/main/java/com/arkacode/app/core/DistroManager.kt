@@ -348,61 +348,9 @@ class DistroManager(private val context: Context) {
 
     // ----------------------------------------------------------------- command
 
-    /**
-     * Rangkaian argv untuk menjalankan [command] di dalam distro.
-     * Mengembalikan null kalau prasyarat (proot + rootfs) belum siap.
-     *
-     * [prootWorkspaceDir] (root bersama semua sesi) di-bind ke `/root/workspace`;
-     * cwd command diarahkan ke subfolder sesi (`/root/workspace/sessions/<sid>`)
-     * kalau tersedia.
-     */
-    fun buildProotCommand(
-        command: String,
-        prootWorkspaceDir: File?,
-        sessionWorkspaceDir: File?,
-        settings: ExecSettings,
-    ): List<String>? {
-        val proot = prootBinary() ?: return null
-        val loader = loaderBinary() ?: return null
-        if (!isInstalled()) return null
-
-        val pw = prootWorkspaceDir
-        val bindWorkspace = settings.bindWorkspace && pw != null
-        val workdir = if (bindWorkspace && sessionWorkspaceDir != null) {
-            "/root/workspace/sessions/${sessionWorkspaceDir.name}"
-        } else {
-            "/root"
-        }
-
-        val argv = mutableListOf(
-            proot.absolutePath,
-            "--kill-on-exit",
-            "-0",
-            "-r", rootfsDir.absolutePath,
-            "-w", workdir,
-            "-b", "/dev",
-            "-b", "/proc",
-            "-b", "/sys",
-            "-b", rootfsDir.absolutePath + "/tmp:/dev/shm",
-        )
-        if (bindWorkspace && pw != null) {
-            argv += listOf("-b", "${pw.absolutePath}:/root/workspace")
-        }
-        argv += listOf(
-            "/usr/bin/env",
-            "-i",
-            "HOME=/root",
-            "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-            "TERM=xterm-256color",
-            "LANG=C.UTF-8",
-            "PROOT_LOADER=${loader.absolutePath}",
-            "PROOT_TMP_DIR=${tmpDir.absolutePath}",
-        )
-        if (settings.prootNoSeccomp) argv += "PROOT_NO_SECCOMP=1"
-        argv += listOf("/bin/sh", "-c", command)
-        return argv
-    }
-
+    // buildProotCommand dipangkas: hanya dipakai ExecRunner (run_command),
+    // yang tidak dibawa di app host headless ini. EngineManager menyusun
+    // argv proot-nya sendiri di serveArgv().
     /**
      * Environment untuk proses proot itu sendiri (bukan di dalam proot):
      * loader + tmp dir harus diset di sini juga karena proot membaca
