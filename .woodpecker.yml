@@ -1,0 +1,37 @@
+# CI Codeberg (Woodpecker).
+# - push/manual: assembleDebug + unit test.
+# - tag v*: assembleRelease → otomatis buat Release + lampirkan APK.
+# Keystore committed (arkacode.keystore) sama seperti pola lama → APK bisa
+# upgrade di tempat tanpa uninstall.
+
+when:
+  event: [push, tag, manual]
+
+steps:
+  build:
+    image: eclipse-temurin:21
+    environment:
+      ANDROID_HOME: /opt/android-sdk
+      ANDROID_SDK_TOOLS: "13114758"
+    commands:
+      - export DEBIAN_FRONTEND=noninteractive
+      - apt-get update -qq && apt-get install -y -qq wget unzip curl >/dev/null
+      - wget -q "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_SDK_TOOLS}_latest.zip"
+      - unzip -q "commandlinetools-linux-${ANDROID_SDK_TOOLS}_latest.zip"
+      - mkdir -p "$ANDROID_HOME/cmdline-tools" && mv cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+      - yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+      - "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0" >/dev/null
+      - cd android && chmod +x gradlew
+      # Tag → release APK; selain itu → debug + test (hemat resource Codeberg).
+      - if [ -n "$CI_COMMIT_TAG" ]; then ./gradlew :app:assembleRelease --stacktrace; else ./gradlew :app:assembleDebug :app:testDebugUnitTest --stacktrace; fi
+
+  publish:
+    image: plugins/gitea-release
+    when:
+      event: tag
+    settings:
+      base_url: https://codeberg.org
+      files:
+        - android/app/build/outputs/apk/release/app-release.apk
+    secrets:
+      - gitea_token
