@@ -1,0 +1,52 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'android/**'
+      - '.github/workflows/build-android-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: assembleDebug
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle (with cache)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build debug APK
+        working-directory: android
+        run: chmod +x gradlew && ./gradlew :app:assembleDebug --stacktrace
+
+      # Unit test JVM (tanpa perangkat): regresi logic murni EngineRelease.
+      - name: Unit test
+        working-directory: android
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+
+      # Task downloadProotBinaries mengambil binary proot dari paket Termux ke
+      # jniLibs. Kalau mirror tidak terjangkau, build tetap sukses tanpa dukungan
+      # distro — detailnya ada di log.
+      - name: Ringkas isi jniLibs (proot)
+        if: always()
+        run: ls -la android/app/build/generated/prootJniLibs/*/ 2>/dev/null || echo "jniLibs proot kosong (di-skip/offline)"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: arka-server-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

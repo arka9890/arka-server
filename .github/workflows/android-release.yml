@@ -1,0 +1,52 @@
+name: Android Release (signed APK)
+
+# Rilis APK bertanda tangan saat tag v* (mis. `git tag v0.1.0 && git push origin v0.1.0`).
+#
+# Kunci signing: keystore bersama yang committed (arkacode.keystore +
+# keystore.properties) — pola yang sama dengan build debug, supaya SEMUA APK
+# (debug & release, semua mesin) bisa saling upgrade di tempat tanpa uninstall.
+#
+# Bila suatu saat butuh kunci rilis terpisah, isi Secrets
+# (KEYSTORE_BASE64/KEYSTORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD), lalu kembalikan
+# langkah "Tulis keystore dari Secrets" seperti di repo Arkacode.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build release APK
+        working-directory: android
+        run: chmod +x gradlew && ./gradlew :app:assembleRelease --stacktrace
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arka-server-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: android/app/build/outputs/apk/release/*.apk
+          generate_release_notes: true
