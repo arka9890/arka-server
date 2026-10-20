@@ -1,0 +1,84 @@
+# CI GitLab untuk Arka Server.
+# - build: assembleDebug + unit test (jalan di semua push/branch).
+# - release: assembleRelease saat tag v* → APK diunggah ke
+#   Package Registry generik + dikaitkan sebagai asset di GitLab Release.
+# Kunci signing: keystore bersama committed (arkacode.keystore) — sama dengan
+# pola upstream, supaya semua APK saling upgrade di tempat tanpa uninstall.
+
+stages: [build, release]
+
+variables:
+  ANDROID_HOME: "/opt/android-sdk"
+  ANDROID_SDK_TOOLS: "13114758"   # cmdline-tools versi stabil terbaru
+  GRADLE_USER_HOME: "$CI_PROJECT_DIR/.gradle"
+  ANDROID_COMPILE_SDK: "35"
+  ANDROID_BUILD_TOOLS: "35.0.0"
+
+.gradle_cache: &gradle_cache
+  key:
+    files:
+      - android/gradle/libs.versions.toml
+  paths:
+    - .gradle
+
+# ---------------------------------------------------------------- instal SDK
+.sdk_setup: &sdk_setup
+  - apt-get update -qq && apt-get install -y -qq wget unzip git >/dev/null
+  - |
+    wget -q "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_SDK_TOOLS}_latest.zip"
+    unzip -q "commandlinetools-linux-${ANDROID_SDK_TOOLS}_latest.zip"
+    mkdir -p "$ANDROID_HOME/cmdline-tools"
+    mv cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+  - yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+  - |
+    "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+      "platform-tools" \
+      "platforms;android-${ANDROID_COMPILE_SDK}" \
+      "build-tools;${ANDROID_BUILD_TOOLS}" >/dev/null
+
+build_debug:
+  stage: build
+  image: eclipse-temurin:21
+  cache: *gradle_cache
+  before_script: *sdk_setup
+  script:
+    - cd android
+    - chmod +x gradlew
+    - ./gradlew :app:assembleDebug :app:testDebugUnitTest --stacktrace
+  artifacts:
+    name: "arka-server-debug-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - android/app/build/outputs/apk/debug/*.apk
+    reports:
+      junit: android/app/build/test-results/testDebugUnitTest/*.xml
+    expire_in: 2 weeks
+
+release_apk:
+  stage: release
+  image: eclipse-temurin:21
+  cache: *gradle_cache
+  before_script: *sdk_setup
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+  script:
+    - cd android && chmod +x gradlew && ./gradlew :app:assembleRelease --stacktrace
+    - cd ..
+    - |
+      APK=android/app/build/outputs/apk/release/app-release.apk
+      test -f "$APK" || { echo "APK release tidak ada"; exit 1; }
+      # Upload ke Package Registry generik (publik utk proyek publik).
+      curl -sSf --header "JOB-TOKEN: $CI_JOB_TOKEN" \
+        --upload-file "$APK" \
+        "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/arka-server/${CI_COMMIT_TAG}/app-release.apk"
+    # Pasang GitLab Release dengan links ke APK + debug (opsional) — pakai release keyword.
+    - echo "Rilis $CI_COMMIT_TAG siap."
+  release:
+    tag_name: "$CI_COMMIT_TAG"
+    name: "Release $CI_COMMIT_TAG"
+    description: "APK release bertanda tangan di asset di bawah. Install di atas versi lama (keystore sama) tanpa uninstall."
+    assets:
+      links:
+        - name: "app-release.apk (bertanda tangan)"
+          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/arka-server/${CI_COMMIT_TAG}/app-release.apk"
+        - name: "Unduh langsung (browser)"
+          url: "${CI_PROJECT_URL}/-/packages/generic/arka-server/${CI_COMMIT_TAG}/app-release.apk"
