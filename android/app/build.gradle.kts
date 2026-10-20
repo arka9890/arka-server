@@ -34,7 +34,7 @@ android {
         targetSdk = 35
         // Naik tiap build CI (GITHUB_RUN_NUMBER) → update dikenali sistem.
         versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
-        versionName = "0.1.1"
+        versionName = "0.1.2"
     }
 
     signingConfigs {

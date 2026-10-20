@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import com.arkacode.app.core.EngineConfig
 import com.arkacode.app.core.EngineManager
 import com.arkacode.app.core.EngineService
+import com.arkacode.app.core.GitCredentials
 import com.arkacode.app.core.SecureStore
 import com.arkacode.app.net.OpenCodeClient
 import com.arkacode.app.ui.ClayBottomBar
@@ -101,6 +102,7 @@ fun MainScreen() {
     val creds = remember { SecureStore.load(ctx) }
     var port by remember { mutableStateOf(creds?.first ?: EngineConfig.DEFAULT_PORT) }
     var password by remember { mutableStateOf(creds?.second?.takeIf { it.isNotBlank() } ?: randomPassword()) }
+    var gitPat by remember { mutableStateOf(SecureStore.getGitPat(ctx) ?: "") }
     var autoboot by remember { mutableStateOf(SecureStore.getBool(ctx, KEY_AUTOBOOT, false)) }
     var autoUpdate by remember { mutableStateOf(SecureStore.getBool(ctx, KEY_AUTO_UPDATE, true)) }
 
@@ -120,7 +122,11 @@ fun MainScreen() {
     }
 
     // Kredensial bawaan (belum pernah disimpan) langsung di-persist.
-    LaunchedEffect(Unit) { if (creds == null) SecureStore.save(ctx, port, password) }
+    LaunchedEffect(Unit) {
+        if (creds == null) SecureStore.save(ctx, port, password)
+        // Sinkronkan PAT ke rootfs (takutnya distro dipasang ulang / pertama).
+        if (gitPat.isNotBlank()) runCatching { GitCredentials.sync(ctx, gitPat) }
+    }
 
     suspend fun healthy(port: Int, pass: String): Boolean =
         runCatching { OpenCodeClient(port = port, password = pass).health() }
@@ -284,6 +290,13 @@ fun MainScreen() {
                     onPasswordChange = { password = it; persist() },
                     onPortChange = { p -> port = p; persist() },
                     onRandomPassword = { password = randomPassword(); persist() },
+                    gitPat = gitPat,
+                    onGitPatChange = { pat ->
+                        // Sudah di-trim; kosong = cabut kredensial distro.
+                        gitPat = pat
+                        runCatching { SecureStore.setGitPat(ctx, pat) }
+                        if (!pat.contains(' ')) runCatching { GitCredentials.sync(ctx, pat) }
+                    },
                     onAutobootChange = { b -> autoboot = b; SecureStore.setBool(ctx, KEY_AUTOBOOT, b) },
                     onAutoUpdateChange = { b -> autoUpdate = b; SecureStore.setBool(ctx, KEY_AUTO_UPDATE, b) },
                 )
@@ -514,6 +527,8 @@ private fun ColumnScope.SettingsTab(
     onPasswordChange: (String) -> Unit,
     onPortChange: (Int) -> Unit,
     onRandomPassword: () -> Unit,
+    gitPat: String,
+    onGitPatChange: (String) -> Unit,
     onAutobootChange: (Boolean) -> Unit,
     onAutoUpdateChange: (Boolean) -> Unit,
 ) {
@@ -578,6 +593,11 @@ private fun ColumnScope.SettingsTab(
                 color = MaterialTheme.colorScheme.error,
             )
         }
+        Spacer(Modifier.height(8.dp))
+        GitHubPatField(
+            value = gitPat,
+            onValueChange = onGitPatChange,
+        )
         Spacer(Modifier.height(8.dp))
         Row(
             Modifier
@@ -730,4 +750,38 @@ private fun formatUptime(ms: Long): String {
     val m = (s % 3600) / 60
     val sec = s % 60
     return if (h > 0) "%dj %02dm".format(h, m) else "%dm %02ds".format(m, sec)
+}
+
+/** Kolom PAT GitHub: tersimpan terenkripsi + tersinkron ke `/root/.git-credentials` distro. */
+@Composable
+private fun GitHubPatField(
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    var visible by remember { mutableStateOf(false) }
+    val trimmed = value.trim()
+    val invalid = trimmed.any { it.isWhitespace() } // whitespace di dalam = token pasti salah
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text("GitHub PAT (opsional)") },
+        supportingText = {
+            when {
+                invalid -> Text("Token tidak valid — tidak ada spasi yang dibolehkan.", color = MaterialTheme.colorScheme.error)
+                else -> Text(
+                    "Buat `git clone/push/pull` di engine terautentikasi. Kosong = cabut. Butuh scope repo.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        singleLine = true,
+        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+        trailingIcon = {
+            TextButton(
+                onClick = { visible = !visible },
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) { Text(if (visible) "Sembunyikan" else "Tampilkan") }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
