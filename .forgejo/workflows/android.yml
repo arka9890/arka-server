@@ -1,6 +1,8 @@
 # Forgejo Actions (Codeberg) — build APK.
-# Strategi: runner `codeberg-small` (5 menit) + image Android SDK slim 1.9GB
-# + cache gradle — supaya muat batas waktu; cache membuat run berikutnya makin cepat.
+# Runner small = 5 menit/job → dibagi 2 job berantai (needs):
+#   warm  : unduh gradle+deps lalu SIMPAN cache gradle.
+#   build : restore cache → assembleRelease → lampir APK ke Release.
+# Catatan: image slim tidak punya `node` (butuh untuk step cache) → install dulu.
 name: android
 
 on:
@@ -12,27 +14,60 @@ env:
   GRADLE_USER_HOME: /tmp/gradle
 
 jobs:
-  build:
+  warm:
     runs-on: codeberg-small
     container:
       image: mobiledevops/android-sdk-image:36.1.0
     steps:
+      - name: Node untuk cache action
+        run: apt-get -qq update && apt-get -qqy install nodejs >/dev/null
+
       - name: Clone
         run: git clone --depth 1 "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" .
 
-      - name: Cache Gradle
-        uses: actions/cache@v4
+      - name: Restore cache
+        uses: actions/cache/restore@v4
         with:
           path: /tmp/gradle
           key: gradle-${{ github.repository }}-${{ hashFiles('android/gradle/libs.versions.toml', 'android/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: gradle-${{ github.repository }}-
 
+      - name: Unduh gradle + semua dependensi
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew --version >/dev/null
+          ./gradlew :app:dependencies --no-daemon -Dkotlin.compiler.execution.strategy=in-process >/dev/null || true
+
+      - name: Simpan cache
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/gradle
+          key: gradle-${{ github.repository }}-${{ hashFiles('android/gradle/libs.versions.toml', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+
+  build:
+    needs: warm
+    runs-on: codeberg-small
+    container:
+      image: mobiledevops/android-sdk-image:36.1.0
+    steps:
+      - name: Node untuk cache action
+        run: apt-get -qq update && apt-get -qqy install nodejs >/dev/null
+
+      - name: Clone
+        run: git clone --depth 1 "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" .
+
+      - name: Restore cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/gradle
+          key: gradle-${{ github.repository }}-${{ hashFiles('android/gradle/libs.versions.toml', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+
       - name: Build release APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew :app:assembleRelease --no-daemon --stacktrace \
-            -Dkotlin.compiler.execution.strategy=in-process
+          ./gradlew :app:assembleRelease --no-daemon -Dkotlin.compiler.execution.strategy=in-process
 
       - name: Attach APK ke Release
         env:
