@@ -1,0 +1,40 @@
+# Forgejo Actions (Codeberg) — builid APK Arka Server.
+# Image CircleCI Android = SDK lengkap tanpa setup, biar muat batas 10 menit.
+# Rilis: lantai tag v* + workflow_dispatch; APK dilampirkan ke Release via API.
+name: android
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: codeberg-small
+    container:
+      image: cimg/android:2026.08.1
+    steps:
+      - name: Clone
+        run: git clone --depth 1 "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" .
+
+      - name: Build release APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --stacktrace --no-daemon
+
+      - name: Attach APK ke Release
+        env:
+          CB_TOKEN: ${{ secrets.CB_TOKEN }}
+        run: |
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          test -f "$APK"
+          # pastikan release ada (abaikan bila sudah ada)
+          curl -s -X POST -H "Authorization: token $CB_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"tag_name\":\"$GITHUB_REF_NAME\",\"name\":\"Release $GITHUB_REF_NAME\"}" \
+            "https://codeberg.org/api/v1/repos/$GITHUB_REPOSITORY/releases" >/dev/null || true
+          curl -sSf -X POST -H "Authorization: token $CB_TOKEN" \
+            -F "attachment=@$APK" \
+            "https://codeberg.org/api/v1/repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME/assets?name=app-release.apk" \
+            | head -c 400

@@ -11,8 +11,6 @@ name: Android Release (signed APK)
 # langkah "Tulis keystore dari Secrets" seperti di repo Arkacode.
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
 
 permissions:
