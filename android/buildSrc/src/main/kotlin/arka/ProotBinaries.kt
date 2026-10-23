@@ -31,7 +31,8 @@ object ProotBinaries {
      * 5.1.107.97 rilis), sehingga build yang memakai versi lama akan 404
      * diam-diam dan APK terbit tanpa binary proot.
      */
-    const val PROOT_VERSION = "5.1.107.97"
+    // 5.1.107.97 sudah dihapus dari mirror Termux (404) → naik ke 5.1.107.99.
+    const val PROOT_VERSION = "5.1.107.99"
     const val TALLOC_VERSION = "2.5.0"
     const val SHMEM_VERSION = "0.7"
 

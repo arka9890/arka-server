@@ -122,6 +122,14 @@ dependencies {
 /** Lewati unduhan binary proot: `./gradlew assembleDebug -Pproot.skip=true`. */
 val prootSkip = (project.findProperty("proot.skip") as String?)?.toBoolean() ?: false
 
+/**
+ * Izinkan build lanjut meski binary proot gagal disiapkan (mis. build offline):
+ * `-Pproot.allowMissing=true`. Default-nya build GAGAL — APK tanpa proot
+ * sebelumnya terbit diam-diam dan menampakkan diri di runtime sebagai error
+ * "Distro belum siap" yang menyesatkan.
+ */
+val prootAllowMissing = (project.findProperty("proot.allowMissing") as String?)?.toBoolean() ?: false
+
 val downloadProotBinaries = tasks.register("downloadProotBinaries") {
     group = "arka"
     description = "Mengunduh binary proot Android (paket Termux) ke jniLibs agar run_command bisa memakai distro Alpine."
@@ -135,10 +143,22 @@ val downloadProotBinaries = tasks.register("downloadProotBinaries") {
     doLast {
         val ready = arka.ProotBinaries.prepare(outputDir, cacheDir) { message -> logger.lifecycle(message) }
         if (ready == 0) {
-            logger.warn(
-                "[proot] Tidak ada binary proot yang berhasil disiapkan (offline / mirror tidak terjangkau). " +
-                    "APK tetap dibangun, tapi run_command butuh binary proot (build ulang dengan jaringan).",
-            )
+            val message =
+                "[proot] Tidak ada binary proot yang berhasil disiapkan (offline / versi pinned 404 dari mirror)."
+            if (prootAllowMissing) {
+                logger.warn(
+                    "$message\n" +
+                        "         APK tetap dibangun (proot.allowMissing=true), " +
+                        "tapi engine tidak akan bisa jalan di perangkat.",
+                )
+            } else {
+                throw GradleException(
+                    "$message\n" +
+                        "         Build dihentikan agar APK tanpa proot tidak terbit diam-diam.\n" +
+                        "         Perbaiki: jalankan ulang dengan jaringan, atau pakai " +
+                        "-Pproot.allowMissing=true (build offline) / -Pproot.skip=true (tanpa distro).",
+                )
+            }
         } else {
             logger.lifecycle("[proot] Siap untuk $ready ABI di ${outputDir.absolutePath}")
         }

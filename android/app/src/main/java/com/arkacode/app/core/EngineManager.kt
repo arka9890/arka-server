@@ -115,10 +115,24 @@ class EngineManager(private val context: Context) {
         }
     }
 
+    /**
+     * Sebab proot/boot tidak bisa jalan. Dulu semua pelempar "Distro belum siap
+     * (pasang Alpine dulu)" padahal binary proot yang hilang dari APK — menyesatkan.
+     */
+    private fun notReadyMessage(): String {
+        val s = distro.status()
+        return when {
+            !s.prootAvailable || !s.loaderAvailable ->
+                "Binary proot tidak ada di APK ini — build ulang APK dengan jaringan."
+            !s.installed -> "Rootfs Alpine belum dipasang (unduh distro dulu)."
+            else -> "Distro belum siap (pasang Alpine dulu)."
+        }
+    }
+
     /** Eksekusi satu perintah LANGSUNG (tanpa sh) di proot dengan bind engine + workspace. */
     suspend fun runOneShot(tail: List<String>, timeoutMs: Long = 30_000): String =
         withContext(Dispatchers.IO) {
-            val argv = baseArgv() ?: throw IllegalStateException("Distro belum siap")
+            val argv = baseArgv() ?: throw IllegalStateException(notReadyMessage())
             val builder = ProcessBuilder(argv + guestEnvTail() + tail)
             builder.directory(context.filesDir)
             builder.environment().apply {
@@ -147,6 +161,9 @@ class EngineManager(private val context: Context) {
         return mutableListOf(
             proot.absolutePath,
             "--kill-on-exit",
+            // SELinux Android melarang link() untuk app biasa; tanpa ini
+            // apk add (ensureGuestLibs) gagal saat membuat hardlink.
+            "--link2symlink",
             "-0",
             "-r", distro.rootfsDir.absolutePath,
             "-w", "/root/workspace",
@@ -492,7 +509,7 @@ class EngineManager(private val context: Context) {
             logFile().appendText("\n===== serve start port=$port =====\n")
 
             val argv = serveArgv(port, workDir, password, providerEnv())
-                ?: throw IllegalStateException("Distro belum siap (pasang Alpine dulu).")
+                ?: throw IllegalStateException(notReadyMessage())
             val builder = ProcessBuilder(argv)
             builder.directory(context.filesDir)
             builder.environment().apply {
@@ -630,6 +647,9 @@ class EngineManager(private val context: Context) {
         return mutableListOf(
             proot.absolutePath,
             "--kill-on-exit",
+            // SELinux Android melarang link() untuk app biasa; tanpa ini
+            // apk add (ensureGuestLibs) gagal saat membuat hardlink.
+            "--link2symlink",
             "-0",
             "-r", distro.rootfsDir.absolutePath,
             "-w", "/root/workspace",
