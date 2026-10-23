@@ -477,6 +477,7 @@ private fun ColumnScope.LogTab(
 ) {
     var logText by remember { mutableStateOf("memuat…") }
     var refreshKey by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(refreshKey) {
         logText = withContext(Dispatchers.IO) {
@@ -497,6 +498,18 @@ private fun ColumnScope.LogTab(
         TextButton(onClick = { onCopy(logText) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Salin") }
         OutlinedButton(onClick = { refreshKey++ }, modifier = Modifier.heightIn(min = 48.dp)) {
             Text("Refresh")
+        }
+        // Bersihkan isi log (truncate): baris baru dari server tetap mengalir.
+        OutlinedButton(
+            onClick = {
+                scope.launch {
+                    withContext(Dispatchers.IO) { engine.clearLog() }
+                    refreshKey++
+                }
+            },
+            modifier = Modifier.heightIn(min = 48.dp),
+        ) {
+            Text("Hapus")
         }
     }
     // Monospace, tick terpilih supaya penyalin cerdas tetap bekerja.

@@ -610,6 +610,19 @@ class EngineManager(private val context: Context) {
     }.getOrDefault("")
 
     /**
+     * Kosongkan log. Truncate (bukan delete): serve jalan memakai redirect
+     * append (O_APPEND), jadi setelah dibersihkan baris baru tetap muncul —
+     * sedangkan delete membuat proses menulis ke fd yatim yang tak terlihat.
+     */
+    fun clearLog() {
+        runCatching {
+            if (logFile().isFile) {
+                java.io.RandomAccessFile(logFile(), "rw").setLength(0)
+            }
+        }
+    }
+
+    /**
      * argv proot untuk serve: cerminan DistroManager.buildProotCommand +
      * bind engine dir, eksekusi binary LANGSUNG (bukan sh -c) agar stop bersih.
      */

@@ -21,7 +21,7 @@ Password: basic auth (OPENCODE_SERVER_PASSWORD ← SecureStore)
 
 - **Tab Server** — status (JALAN/MULAI/MATI, versi + uptime), URL (splain),
   start/stop besar, hint Tailscale + battery optimization.
-- **Tab Log** — `serve.log` monospace, Salin/Refresh.
+- **Tab Log** — `serve.log` monospace, Salin/Refresh/Hapus.
 - **Tab Pengaturan** — password (+ generasikan acak kuat) mempersulit "berlaku
   setelah restart", port, mulai-otomatis, dan blok engine:
   update otomatis (tutup/nyala), update manual (cek+ unduh+ verifikasi
