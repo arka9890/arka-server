@@ -29,11 +29,18 @@ Password / API Key: OPENCODE_SERVER_PASSWORD (tersimpan di SecureStore)
 
 - **Tab Server** — status (JALAN/MULAI/MATI, versi + uptime), URL Web UI (:4097),
   URL OpenAI API (:4098/v1), start/stop besar, hint Tailscale + battery optimization.
+  Pesan hasil aksi — `GAGAL: …`, `password tidak boleh kosong`, `server dihentikan` —
+  tampil di sini **utuh tanpa dipotong**, karena ini balasan langsung atas tombol
+  yang barusan ditekan.
 - **OpenAI-Compatible Bridge (:4098)** — mengekspos endpoint standar
   `/v1/chat/completions` dan `/v1/models` agar bisa disambungkan langsung ke tool
   seperti Cursor, VS Code Cline, Continue.dev, LibreChat, Chatbox, atau script OpenAI SDK.
   Mendukung streaming SSE, reasoning content, multi-turn, dan multimodal gambar.
-- **Tab Log** — `serve.log` monospace, Salin/Refresh/Hapus.
+- **Tab Log** — progres/teknis pindah ke sini (dulu menumpuk di halaman depan):
+  `distro 45%`, `engine 12%`, unduhan, cek pembaruan. Di bawahnya `serve.log`
+  monospace **tampil penuh tanpa dipotong** (sebelumnya hanya 400 baris terakhir,
+  sehingga stack trace proot yang dibutuhkan saat debug sering hilang), lengkap
+  dengan Salin/Refresh/Hapus.
 - **Tab Pengaturan** — password (+ generasikan acak kuat), port Web UI & port OpenAI bridge,
   toggle OpenAI API bridge, mulai-otomatis, sinkronisasi token GitHub PAT, dan blok engine:
   update otomatis (tutup/nyala), update manual (cek+ unduh+ verifikasi
@@ -69,8 +76,9 @@ seperti di Arkacode.
 
 ## Proses server pertama kali
 
-MULAI → download ubuntu-base 22.04 (±30 MB) → pustaka tamu via apt →
-opencode terbaru dari npm (fallback pin `v2.0.31`, ±60 MB, verifikasi sha512)
+MULAI → download ubuntu-base 22.04 (±30 MB) → pustaka tamu via apt (dilewati
+bila sudah terpasang — dicek dulu, tidak menjalankan apt ulang yang tak perlu)
+→ opencode terbaru dari npm (fallback pin `v2.0.31`, ±60 MB, verifikasi sha512)
 → `serve`. Log tampil di layar Log. Rootfs lama (Alpine) terdeteksi sendiri
 dan diganti saat boot.
 
