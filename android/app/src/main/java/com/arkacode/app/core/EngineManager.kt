@@ -118,10 +118,15 @@ class EngineManager(private val context: Context) {
                 )
             } else {
                 // ubuntu-base: sumber arm64 (ports) ditambah kalau belum ada.
+                // `dpkg --configure -a` dulu: proses apt sebelumnya bisa terbunuh
+                // di tengah (app di-close / timeout) dan meninggalkan status
+                // "dpkg was interrupted" yang lengket — tanpa ini semua percobaan
+                // berikutnya langsung gagal tanpa sempat mencoba.
                 runOneShot(
                     listOf(
                         "/bin/sh", "-c",
-                        "grep -q ports.ubuntu.com /etc/apt/sources.list 2>/dev/null || " +
+                        "dpkg --configure -a >/dev/null 2>&1; " +
+                            "grep -q ports.ubuntu.com /etc/apt/sources.list 2>/dev/null || " +
                             "echo 'deb http://ports.ubuntu.com/ubuntu-ports jammy main universe' >> /etc/apt/sources.list; " +
                             "DEBIAN_FRONTEND=noninteractive apt-get update -qq && " +
                             "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq " +
