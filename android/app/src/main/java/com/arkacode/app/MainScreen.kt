@@ -57,7 +57,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.arkacode.app.core.EngineConfig
 import com.arkacode.app.core.EngineManager
@@ -114,13 +113,18 @@ fun MainScreen() {
     var startedAt by remember { mutableStateOf<Long?>(null) }
     var uptimeMs by remember { mutableStateOf(0L) }
     var statusLine by remember { mutableStateOf<String?>(null) }
+    var progressLine by remember { mutableStateOf<String?>(null) }
     var tab by remember { mutableStateOf(Tab.SERVER) }
 
     fun persist() = SecureStore.save(ctx, port, password)
-    fun slog(s: String) { statusLine = s }
+    // Progres/teknis (unduhan, persentase) → tab Log; hasil aksi — sukses,
+    // gagal, validasi — tetap di tab Server karena balasan atas tombol yang
+    // barusan ditekan di sana.
+    fun slog(s: String) { progressLine = s }
+    fun alert(s: String) { statusLine = s }
     fun copy(text: String, label: String) {
         clipboard?.setText(AnnotatedString(text))
-        slog("$label disalin.")
+        alert("$label disalin.")
     }
 
     // Kredensial bawaan (belum pernah disimpan) langsung di-persist.
@@ -145,7 +149,7 @@ fun MainScreen() {
                 startedAt = System.currentTimeMillis()
                 serverVersion = alive.version
                 status = Status.JALAN
-                slog("server sudah jalan v${alive.version}.")
+                alert("server sudah jalan v${alive.version}.")
                 runCatching { EngineService.start(ctx, port, alive.version) }
                 if (bridgeEnabled) {
                     engine.startBridge(bridgePort, port, password)
@@ -190,13 +194,13 @@ fun MainScreen() {
             startedAt = System.currentTimeMillis()
             serverVersion = h.version
             status = Status.JALAN
-            slog("server jalan v${h.version}.")
+            alert("server jalan v${h.version}.")
             runCatching { EngineService.start(ctx, port, h.version) }
         } catch (e: Exception) {
             runCatching { engine.stopServer() }
             EngineService.stop(ctx)
             status = Status.MATI
-            slog("GAGAL: ${e.message ?: "tidak diketahui"}")
+            alert("GAGAL: ${e.message ?: "tidak diketahui"}")
         }
     }
 
@@ -211,11 +215,11 @@ fun MainScreen() {
                 startedAt = null
                 serverVersion = null
                 status = Status.MATI
-                slog("server dihentikan.")
+                alert("server dihentikan.")
             }
             Status.MATI -> {
                 if (password.isBlank()) {
-                    slog("password tidak boleh kosong — isi dulu di tab Pengaturan.")
+                    alert("password tidak boleh kosong — isi dulu di tab Pengaturan.")
                     return
                 }
                 persist()
@@ -252,7 +256,7 @@ fun MainScreen() {
                 startedAt = null
                 serverVersion = null
                 status = Status.MATI
-                slog("server tidak lagi merespons.")
+                alert("server tidak lagi merespons.")
             }
         }
     }
@@ -294,7 +298,11 @@ fun MainScreen() {
                     onCopy = { copy(it, "URL") },
                     onMain = ::onMainButton,
                 )
-                Tab.LOG -> LogTab(engine = engine, onCopy = { copy(it, "Log") })
+                Tab.LOG -> LogTab(
+                    progressLine = progressLine,
+                    engine = engine,
+                    onCopy = { copy(it, "Log") },
+                )
                 Tab.SETTINGS -> SettingsTab(
                     ctx = ctx,
                     engine = engine,
@@ -361,8 +369,9 @@ private fun ColumnScope.ServerTab(
             statusLine,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
+            // Tanpa maxLines: kini hanya berisi hasil aksi (sukses/gagal/validasi),
+            // dan pesan GAGAL justru harus terbaca utuh — dulu terpotong ellipsis
+            // karena baris ini masih menampung progres.
         )
     }
 
@@ -531,6 +540,7 @@ private fun BatteryRow() {
 
 @Composable
 private fun ColumnScope.LogTab(
+    progressLine: String?,
     engine: EngineManager,
     onCopy: (String) -> Unit,
 ) {
@@ -574,6 +584,16 @@ private fun ColumnScope.LogTab(
         ) {
             Text("Hapus")
         }
+    }
+    // Progres/teknis yang tadinya menumpuk di tab Server; tanpa maxLines biar
+    // tak lagi kepotong ellipsis seperti di halaman depan.
+    if (progressLine != null) {
+        Text(
+            progressLine,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
     }
     // Monospace, tick terpilih supaya penyalin cerdas tetap bekerja.
     ClaySurface(shape = com.arkacode.app.ui.ClayShape, elevation = 10.dp) {
