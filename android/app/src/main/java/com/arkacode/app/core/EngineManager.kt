@@ -111,6 +111,14 @@ class EngineManager(private val context: Context) {
             val marker = File(rootfs, "root/.guestlibs-ok")
             if (marker.isFile) return@runCatching
             val isAlpine = File(rootfs, "sbin/apk").isFile
+            // Percobaan sebelumnya bisa terbunuh tepat sebelum marker ditulis,
+            // sehingga pustaka sudah lengkap tapi marker tidak ada. Tanpa cek ini
+            // apt/dpkg dijalankan ulang tanpa perlu — dan menjalankannya di proot
+            // terbukti memicu segfault (signal 11) di perangkat tertentu.
+            if (guestLibsPresent(rootfs)) {
+                runCatching { marker.writeText("ok") }
+                return@runCatching
+            }
             val out = if (isAlpine) {
                 runOneShot(
                     listOf("/sbin/apk", "add", "--no-cache", "libstdc++", "libgcc"),
@@ -143,6 +151,16 @@ class EngineManager(private val context: Context) {
             Unit
         }
     }
+
+    /**
+     * Pustaka C++ sudah ada di rootfs? Dipakai untuk melewati apt/apk bila
+     * pemasangan sebelumnya sudah sukses tapi prosesnya mati sebelum marker
+     * ditulis. Path mengikuti tata letak dua rootfs yang didukung.
+     */
+    private fun guestLibsPresent(rootfs: File): Boolean = listOf(
+        "usr/lib/aarch64-linux-gnu/libstdc++.so.6",
+        "usr/lib/libstdc++.so.6",
+    ).any { File(rootfs, it).exists() }
 
     /**
      * Sebab proot/boot tidak bisa jalan. Dulu semua pelempar "Distro belum siap
