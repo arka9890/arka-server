@@ -1,7 +1,9 @@
 name: Build Android APK
 
+# Debug: build lokal untuk debugging. Workflow ini sengaja TIDAK memicu saat
+# push (hanya workflow_dispatch) supaya tidak dobel dengan CI di Codeberg.
+# Rilis otomatis ada di android-release.yml saat tag v*.
 on:
-  workflow_dispatch:
   workflow_dispatch:
 
 permissions:
