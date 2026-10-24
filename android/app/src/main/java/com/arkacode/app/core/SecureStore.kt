@@ -77,4 +77,23 @@ object SecureStore {
             e.apply()
         }
     }
+
+    // ---- OpenAI-compatible Bridge Settings ----
+    const val DEFAULT_BRIDGE_PORT = 4098
+
+    fun getBridgePort(context: Context): Int = runCatching {
+        prefs(context).getInt("bridge_port", DEFAULT_BRIDGE_PORT)
+    }.getOrDefault(DEFAULT_BRIDGE_PORT)
+
+    fun setBridgePort(context: Context, port: Int) {
+        runCatching { prefs(context).edit().putInt("bridge_port", port).apply() }
+    }
+
+    fun isBridgeEnabled(context: Context): Boolean = runCatching {
+        prefs(context).getBoolean("bridge_enabled", true)
+    }.getOrDefault(true)
+
+    fun setBridgeEnabled(context: Context, enabled: Boolean) {
+        runCatching { prefs(context).edit().putBoolean("bridge_enabled", enabled).apply() }
+    }
 }

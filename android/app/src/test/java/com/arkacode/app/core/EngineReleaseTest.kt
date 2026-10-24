@@ -56,17 +56,17 @@ class EngineReleaseTest {
     }
 
     @Test
-    fun packageCandidates_arm64MuslFirst() {
+    fun packageCandidates_arm64GnuFirst() {
         val c = EngineRelease.packageCandidates("arm64-v8a")
-        assertEquals("@opencode/cli-linux-arm64-musl", c.first())
-        assertTrue(c.contains("@opencode/cli-linux-arm64"))
+        assertEquals("@opencode/cli-linux-arm64", c.first())
+        assertTrue(c.contains("@opencode/cli-linux-arm64-musl"))
     }
 
     @Test
     fun packageCandidates_x64() {
         val c = EngineRelease.packageCandidates("x86_64")
-        assertEquals("@opencode/cli-linux-x64-musl", c.first())
-        assertTrue(c.contains("@opencode/cli-linux-x64"))
+        assertEquals("@opencode/cli-linux-x64", c.first())
+        assertTrue(c.contains("@opencode/cli-linux-x64-musl"))
     }
 
     @Test

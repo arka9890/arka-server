@@ -30,11 +30,13 @@ data class DistroStatus(
 /**
  * Runtime distro untuk `run_command` (M8).
  *
- * Kenapa proot + Alpine?
+ * Kenapa proot + Ubuntu base?
  *  - `Runtime.exec` di Android hanya memberi toybox tanpa package manager, jadi
- *    AI praktis tidak bisa "ngoding" (tanpa git/node/python/apk).
- *  - proot (tanpa root) + Alpine minirootfs memberi distro Linux asli: shell,
- *    apk, git, python3, node, dll. Ini yang dipakai Termux/Andronix/UserLAnd.
+ *    AI praktis tidak bisa "ngoding" (tanpa git/node/python).
+ *  - proot (tanpa root) + ubuntu-base memberi distro Linux asli: shell, apt,
+ *    git, python3, node, dll. Pilihan ini disamakan dengan runtime arka yang
+ *    terbukti stabil menjalankan engine opencode (Alpine/musl lama: engine
+ *    segfault saat chat).
  *
  * Detail penting platform (Android 10+, targetSdk 29+):
  *  - Eksekusi file dari folder data aplikasi **diblokir** (SELinux). Karena itu
@@ -42,38 +44,21 @@ data class DistroStatus(
  *    (`libproot.so`, `libproot-loader.so`) sehingga terpasang di
  *    `nativeLibraryDir` yang boleh dieksekusi. Task Gradle
  *    `downloadProotBinaries` yang mengisinya (lihat app/build.gradle.kts).
- *  - Rootfs Alpine (file biasa) tetap boleh di folder data karena dieksekusi
+ *  - Rootfs (file biasa) tetap boleh di folder data karena dieksekusi
  *    *lewat* proot-loader, bukan langsung oleh kernel.
  */
 class DistroManager(private val context: Context) {
 
     companion object {
-        const val DISTRO_NAME = "alpine"
+        const val DISTRO_NAME = "ubuntu-22.04"
 
-        /** Alpine minirootfs per-ABI (v3.20, LTS ringan ±3.6 MB). */
-        fun rootfsUrlFor(abi: String): String {
-            val arch = when (abi.lowercase()) {
-                "arm64-v8a" -> "aarch64"
-                "armeabi-v7a" -> "armv7"
-                "x86_64" -> "x86_64"
-                "x86" -> "x86"
-                else -> "aarch64"
-            }
-            val file = if (arch == "aarch64") {
-                "alpine-minirootfs-3.20.3-aarch64.tar.gz"
-            } else {
-                "alpine-minirootfs-3.20.3-$arch.tar.gz"
-            }
-            val dir = when (arch) {
-                "aarch64" -> "aarch64"
-                "armv7" -> "armv7"
-                "x86_64" -> "x86_64"
-                else -> "x86"
-            }
-            return "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/$dir/$file"
-        }
-
-        const val DEFAULT_ROOTFS_URL = "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/aarch64/alpine-minirootfs-3.20.3-aarch64.tar.gz"
+        /**
+         * ubuntu-base arm64 (±30 MB). Penamaan direktori mengikuti arsip ini
+         * sehingga perangkat lama (rootfs `alpine`) otomatis dianggap belum
+         * terpasang → migrasi rootfs terjadi sendiri saat boot berikutnya.
+         */
+        const val DEFAULT_ROOTFS_URL =
+            "https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04.5-base-arm64.tar.gz"
 
         /** Cermin alternatif kalau CDN utama tidak bisa dijangkau dari perangkat. */
         val ROOTFS_MIRRORS = listOf(
@@ -108,15 +93,17 @@ class DistroManager(private val context: Context) {
         ?.firstOrNull { it.name == "libandroid-shmem.so" }
 
     /**
-     * Rootfs dianggap terpasang kalau berkas penanda Alpine ada sebagai FILE biasa.
+     * Rootfs dianggap terpasang kalau berkas penanda ada sebagai FILE biasa
+     * (`etc/os-release` ada di ubuntu-base maupun Alpine).
      *
-     * Jangan pakai `bin/sh`: di Alpine itu symlink absolut `/bin/sh -> /bin/busybox`.
-     * `File.exists()` mengikuti symlink ke path HOST Android (`/bin/busybox` tidak
-     * ada di perangkat), sehingga rootfs yang sudah terpasang dianggap belum ada.
-     * Ini penyebab bug "sudah di-install tapi tidak terbaca".
+     * Jangan pakai symlink absolut (mis. `/bin/sh -> /bin/busybox`): `File.exists()`
+     * mengikuti symlink ke path HOST Android, sehingga rootfs yang sudah terpasang
+     * dianggap belum ada. Ini penyebab bug "sudah di-install tapi tidak terbaca".
      */
     fun isInstalled(): Boolean =
-        File(rootfsDir, "etc/alpine-release").isFile || File(rootfsDir, "bin/busybox").isFile
+        File(rootfsDir, "etc/os-release").isFile ||
+            File(rootfsDir, "etc/alpine-release").isFile ||
+            File(rootfsDir, "bin/busybox").isFile
 
     fun status(): DistroStatus {
         val proot = prootBinary()
@@ -127,8 +114,8 @@ class DistroManager(private val context: Context) {
             proot == null || loader == null ->
                 "Binary proot belum ada di APK ini (task Gradle downloadProotBinaries gagal/di-skip). " +
                     "Build ulang dengan jaringan agar run_command bisa jalan."
-            !installed -> "Rootfs Alpine belum dipasang. Unduh ±3,6 MB untuk mengaktifkan distro."
-            else -> "Alpine siap (${size / (1024 * 1024)} MB) di ${rootfsDir.absolutePath}"
+            !installed -> "Rootfs Ubuntu belum dipasang. Unduh ±30 MB untuk mengaktifkan distro."
+            else -> "Ubuntu 22.04 siap (${size / (1024 * 1024)} MB) di ${rootfsDir.absolutePath}"
         }
         return DistroStatus(
             abi = abi,
@@ -146,7 +133,7 @@ class DistroManager(private val context: Context) {
     // ------------------------------------------------------------------ install
 
     /**
-     * Unduh rootfs Alpine lalu ekstrak ke folder data aplikasi.
+     * Unduh rootfs lalu ekstrak ke folder data aplikasi.
      * [onProgress] menerima 0..100 dan label status untuk ditampilkan di UI.
      */
     suspend fun install(
@@ -177,10 +164,10 @@ class DistroManager(private val context: Context) {
                     rootfsDir.mkdirs()
                     extractTarGz(tmpArchive) { percent -> onProgress(52 + percent / 2, "Mengekstrak rootfs… $percent%") }
                     tmpArchive.delete()
-                    check(isInstalled()) { "Ekstraksi selesai tapi etc/alpine-release tidak ada — arsip bukan rootfs Alpine." }
+                    check(isInstalled()) { "Ekstraksi selesai tapi etc/os-release tidak ada — arsip bukan rootfs Linux." }
                     onProgress(97, "Menyiapkan /root/workspace & resolv.conf…")
                     postInstall()
-                    onProgress(100, "Alpine terpasang.")
+                    onProgress(100, "Rootfs Ubuntu terpasang.")
                     return@runCatching
                 } catch (e: Exception) {
                     lastError = e
@@ -204,9 +191,9 @@ class DistroManager(private val context: Context) {
                 rootfsDir.deleteRecursively()
                 rootfsDir.mkdirs()
                 extractTarGz(input) { percent -> onProgress(5 + percent * 9 / 10, "Mengekstrak rootfs… $percent%") }
-                check(isInstalled()) { "Arsip bukan rootfs Alpine (etc/alpine-release tidak ditemukan)." }
+                check(isInstalled()) { "Arsip bukan rootfs Linux (etc/os-release tidak ditemukan)." }
                 postInstall()
-                onProgress(100, "Alpine terpasang dari file lokal.")
+                onProgress(100, "Rootfs terpasang dari file lokal.")
             }
         }
 
@@ -397,5 +384,5 @@ class DistroManager(private val context: Context) {
 
     /** Diagnostik cepat: dipakai tombol "Tes distro" di Settings. */
     fun diagnosticCommand(): String =
-        "cat /etc/alpine-release 2>/dev/null; uname -a; id; echo workspace:; ls -a /root/workspace 2>/dev/null | head -20"
+        "cat /etc/os-release 2>/dev/null | head -3; uname -a; id; echo workspace:; ls -a /root/workspace 2>/dev/null | head -20"
 }

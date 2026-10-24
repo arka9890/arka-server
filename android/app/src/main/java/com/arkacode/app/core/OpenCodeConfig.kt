@@ -40,13 +40,14 @@ object OpenCodeConfig {
     )
 
     private fun rootfsDir(context: Context): File =
-        File(File(context.filesDir, "distro"), "alpine")
+        File(File(context.filesDir, "distro"), DistroManager.DISTRO_NAME)
 
     fun configFile(context: Context): File = File(rootfsDir(context), CONFIG_REL)
 
-    /** True bila rootsf Alpine sudah terpasang (tanpa itu tak ada tempat menulis config). */
+    /** True bila rootfs sudah terpasang (tanpa itu tak ada tempat menulis config). */
     fun isAvailable(context: Context): Boolean =
-        File(rootfsDir(context), "etc/alpine-release").isFile ||
+        File(rootfsDir(context), "etc/os-release").isFile ||
+            File(rootfsDir(context), "etc/alpine-release").isFile ||
             File(rootfsDir(context), "bin/busybox").isFile
 
     /** Nama env deterministik tempat menyuntik API key provider kustom. */

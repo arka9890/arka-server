@@ -16,13 +16,13 @@ object GitCredentials {
     private const val CONFIG_PATH = "root/.gitconfig"
 
     private fun rootfsDir(context: Context): File =
-        File(File(context.filesDir, "distro"), "alpine")
+        File(File(context.filesDir, "distro"), DistroManager.DISTRO_NAME)
 
     /** Sinkronkan kredensial proot dengan [token] (kosong = cabut). */
     fun sync(context: Context, token: String) {
         runCatching {
             val root = rootfsDir(context)
-            if (!File(root, "etc/alpine-release").isFile && !File(root, "bin/busybox").isFile) return
+            if (!File(root, "etc/os-release").isFile) return
             val clean = token.trim()
             val cred = File(root, CRED_PATH)
             if (clean.isEmpty()) {

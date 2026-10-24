@@ -75,25 +75,29 @@ object EngineRelease {
     // ------------------------------------------------------------ paket / ABI
 
     /**
-     * Kandidat nama paket npm berurutan (musl dulu karena Alpine, lalu gnu) untuk ABI
-     * perangkat. `armeabi-v7a` (32-bit) tidak disediakan upstream → fallback arm64.
+     * Kandidat nama paket npm berurutan untuk ABI perangkat.
+     *
+     * gnu dulu karena rootfs sekarang ubuntu-22.04: binary gnu memakai loader
+     * glibc + libstdc++ multiarch (sudah dipasang ensureGuestLibs). Varian musl
+     * butuh loader `ld-musl` yang TIDAK ada di ubuntu — hanya untuk fallback.
+     * `armeabi-v7a` (32-bit) tidak disediakan upstream → fallback arm64.
      */
     fun packageCandidates(abi: String): List<String> {
         val a = abi.lowercase()
         return when {
             a.startsWith("arm64") || a.contains("aarch64") -> listOf(
-                "$SCOPE/cli-linux-arm64-musl",
                 "$SCOPE/cli-linux-arm64",
+                "$SCOPE/cli-linux-arm64-musl",
             )
             a.startsWith("x86_64") || a.startsWith("x64") || a.contains("amd64") -> listOf(
-                "$SCOPE/cli-linux-x64-musl",
                 "$SCOPE/cli-linux-x64",
-                "$SCOPE/cli-linux-x64-baseline-musl",
                 "$SCOPE/cli-linux-x64-baseline",
+                "$SCOPE/cli-linux-x64-musl",
+                "$SCOPE/cli-linux-x64-baseline-musl",
             )
             else -> listOf(
-                "$SCOPE/cli-linux-arm64-musl",
                 "$SCOPE/cli-linux-arm64",
+                "$SCOPE/cli-linux-arm64-musl",
             )
         }
     }

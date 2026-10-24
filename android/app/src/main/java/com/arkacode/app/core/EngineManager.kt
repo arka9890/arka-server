@@ -14,7 +14,7 @@ import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 
 /**
- * Unduh + jalankan binary `opencode` resmi di dalam proot Alpine (F0).
+ * Unduh + jalankan binary `opencode` resmi di dalam proot ubuntu (F0).
  *
  * - Engine = opencode line **v2** (paket npm `@opencode/cli*`); API `/api/...`.
  * - Versi di-pin ([EngineConfig.VERSION]) demi build reproducible.
@@ -67,11 +67,17 @@ class EngineManager(private val context: Context) {
     private val engineDir: File get() = File(context.filesDir, "engine").apply { mkdirs() }
     private val workspaceDir: File get() = File(context.filesDir, "workspace").apply { mkdirs() }
 
+    /** Data engine (sesi opencode) — bind ke /opt/arkacode-data, tahan rootfs reinstall. */
+    private val opencodeDataDir: File get() = File(context.filesDir, "opencode-data").apply { mkdirs() }
+
     fun binaryFile(): File = File(engineDir, "opencode")
     fun logFile(): File = File(engineDir, "serve.log")
 
     @Volatile
     private var serverProcess: Process? = null
+
+    @Volatile
+    private var bridgeServer: com.arkacode.app.bridge.OpenAiBridgeServer? = null
 
     fun isDownloaded(): Boolean {
         val bin = binaryFile()
@@ -96,22 +102,40 @@ class EngineManager(private val context: Context) {
     /**
      * Binary opencode butuh simbol C++ (libstdc++/libgcc) yang tidak ada di
      * Alpine minirootfs polos — tanpa ini serve mati dengan "Error relocating".
-     * Diinstal sekali via apk; marker di dalam rootfs sehingga ikut terhapus
-     * (dan dipasang ulang) saat rootfs dipasang ulang.
+     * Diinstal sekali (apk di rootfs lama, apt di Ubuntu); marker di dalam
+     * rootfs sehingga ikut terhapus (dan dipasang ulang) saat rootfs dipasang ulang.
      */
     suspend fun ensureGuestLibs(): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
-            val marker = File(distro.rootfsDir, "root/.guestlibs-ok")
-            if (!marker.isFile) {
-                val out = runOneShot(
+            val rootfs = distro.rootfsDir
+            val marker = File(rootfs, "root/.guestlibs-ok")
+            if (marker.isFile) return@runCatching
+            val isAlpine = File(rootfs, "sbin/apk").isFile
+            val out = if (isAlpine) {
+                runOneShot(
                     listOf("/sbin/apk", "add", "--no-cache", "libstdc++", "libgcc"),
                     180_000,
                 )
-                if (out.contains("ERROR", ignoreCase = true)) {
-                    throw IllegalStateException("apk gagal: ${out.trim().take(500)}")
-                }
-                runCatching { marker.writeText("ok") }
+            } else {
+                // ubuntu-base: sumber arm64 (ports) ditambah kalau belum ada.
+                runOneShot(
+                    listOf(
+                        "/bin/sh", "-c",
+                        "grep -q ports.ubuntu.com /etc/apt/sources.list 2>/dev/null || " +
+                            "echo 'deb http://ports.ubuntu.com/ubuntu-ports jammy main universe' >> /etc/apt/sources.list; " +
+                            "DEBIAN_FRONTEND=noninteractive apt-get update -qq && " +
+                            "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq " +
+                            "--no-install-recommends libstdc++6 libgcc-s1 && echo guestlibs-ok",
+                    ),
+                    300_000,
+                )
             }
+            val ok = if (isAlpine) !out.contains("ERROR", ignoreCase = true)
+            else out.contains("guestlibs-ok")
+            if (!ok) throw IllegalStateException("pustaka tamu gagal: ${out.trim().take(500)}")
+            // Marker hanya penanda; kegagalan menulisnya tidak menggagalkan.
+            runCatching { marker.writeText("ok") }
+            Unit
         }
     }
 
@@ -124,8 +148,8 @@ class EngineManager(private val context: Context) {
         return when {
             !s.prootAvailable || !s.loaderAvailable ->
                 "Binary proot tidak ada di APK ini — build ulang APK dengan jaringan."
-            !s.installed -> "Rootfs Alpine belum dipasang (unduh distro dulu)."
-            else -> "Distro belum siap (pasang Alpine dulu)."
+            !s.installed -> "Rootfs Ubuntu belum dipasang (unduh distro dulu)."
+            else -> "Distro belum siap (pasang rootfs dulu)."
         }
     }
 
@@ -485,8 +509,13 @@ class EngineManager(private val context: Context) {
 
     fun distroStatus(): DistroStatus = distro.status()
 
-    suspend fun setupDistro(onProgress: (Int, String) -> Unit = { _, _ -> }): Result<Unit> =
-        distro.install(DistroManager.DEFAULT_ROOTFS_URL, onProgress)
+    suspend fun setupDistro(onProgress: (Int, String) -> Unit = { _, _ -> }): Result<Unit> {
+        distro.install(DistroManager.DEFAULT_ROOTFS_URL, onProgress).getOrThrow()
+        onProgress(0, "Memasang pustaka tamu (apt)…")
+        ensureGuestLibs().getOrThrow()
+        onProgress(100, "Rootfs Ubuntu siap.")
+        return Result.success(Unit)
+    }
 
     /**
      * Jalankan `opencode serve` sebagai proses persisten, lalu tunggu `/api/info`
@@ -538,7 +567,10 @@ class EngineManager(private val context: Context) {
                 }
                 try {
                     val h = client.health()
-                    if (h.healthy) return@runCatching port
+                    if (h.healthy) {
+                        startBridgeIfEnabled(port, password)
+                        return@runCatching port
+                    }
                     lastErr = "healthy=false"
                 } catch (e: Exception) {
                     lastErr = e.message ?: "menunggu..."
@@ -551,6 +583,7 @@ class EngineManager(private val context: Context) {
     }
 
     fun stopServer() {
+        stopBridge()
         runCatching { serverProcess?.destroy() }
         runCatching {
             serverProcess?.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
@@ -558,6 +591,31 @@ class EngineManager(private val context: Context) {
         runCatching { serverProcess?.destroyForcibly() }
         serverProcess = null
         runCatching { logFile().appendText("===== serve stop =====\n") }
+    }
+
+    fun startBridge(bridgePort: Int, serverPort: Int, password: String) {
+        stopBridge()
+        bridgeServer = com.arkacode.app.bridge.OpenAiBridgeServer(
+            bridgePort = bridgePort,
+            targetServerPort = serverPort,
+            serverPassword = password,
+        ).apply {
+            start()
+        }
+    }
+
+    fun stopBridge() {
+        bridgeServer?.stop()
+        bridgeServer = null
+    }
+
+    fun isBridgeRunning(): Boolean = bridgeServer?.isAlive() == true
+
+    fun startBridgeIfEnabled(serverPort: Int, password: String) {
+        if (SecureStore.isBridgeEnabled(context)) {
+            val bPort = SecureStore.getBridgePort(context)
+            startBridge(bPort, serverPort, password)
+        }
     }
 
     /**
@@ -672,6 +730,7 @@ class EngineManager(private val context: Context) {
             "-b", distro.rootfsDir.absolutePath + "/tmp:/dev/shm",
             "-b", "${pw.absolutePath}:/root/workspace",
             "-b", "${engineDir.absolutePath}:/opt/arkacode",
+            "-b", "${opencodeDataDir.absolutePath}:/opt/arkacode-data",
             "/usr/bin/env",
             "-i",
             "HOME=/root",
@@ -681,6 +740,9 @@ class EngineManager(private val context: Context) {
             "PROOT_LOADER=${loader.absolutePath}",
             "PROOT_TMP_DIR=${File(context.filesDir, "proot-tmp").apply { mkdirs() }.absolutePath}",
             "PROOT_NO_SECCOMP=1",
+            // Data engine (sesi/log) di folder terpisah agar selamat saat rootfs
+            // dipasang ulang — meniru runtime arka yang terbukti stabil.
+            "XDG_DATA_HOME=/opt/arkacode-data",
             "OPENCODE_DISABLE_AUTOUPDATE=1",
             "OPENCODE_SERVER_PASSWORD=$password",
         ) + extraEnv.map { (k, v) -> "$k=$v" } + listOf(

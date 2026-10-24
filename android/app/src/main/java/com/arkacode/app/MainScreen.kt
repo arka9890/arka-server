@@ -105,6 +105,8 @@ fun MainScreen() {
     var gitPat by remember { mutableStateOf(SecureStore.getGitPat(ctx) ?: "") }
     var autoboot by remember { mutableStateOf(SecureStore.getBool(ctx, KEY_AUTOBOOT, false)) }
     var autoUpdate by remember { mutableStateOf(SecureStore.getBool(ctx, KEY_AUTO_UPDATE, true)) }
+    var bridgeEnabled by remember { mutableStateOf(SecureStore.isBridgeEnabled(ctx)) }
+    var bridgePort by remember { mutableStateOf(SecureStore.getBridgePort(ctx)) }
 
     // ---- status server ----
     var status by remember { mutableStateOf(Status.MATI) }
@@ -145,14 +147,23 @@ fun MainScreen() {
                 status = Status.JALAN
                 slog("server sudah jalan v${alive.version}.")
                 runCatching { EngineService.start(ctx, port, alive.version) }
+                if (bridgeEnabled) {
+                    engine.startBridge(bridgePort, port, password)
+                }
                 return
             }
             val distro = withContext(Dispatchers.IO) { engine.distroStatus() }
             if (!distro.installed) {
-                slog("mengunduh Alpine (±4 MB)…")
+                slog("mengunduh Ubuntu (±30 MB)…")
                 engine.setupDistro { p, label -> slog("distro $p% — $label") }.getOrThrow()
             }
-            if (!withContext(Dispatchers.IO) { engine.isDownloaded() }) {
+            val downloaded = withContext(Dispatchers.IO) { engine.isDownloaded() }
+            // Binary lama (mis. flavor musl dari rootfs Alpine sebelumnya) tidak
+            // jalan di rootfs ubuntu — terdeteksi sebagai version() null walau
+            // file ada → unduh ulang kandidat gnu.
+            val broken = downloaded && withContext(Dispatchers.IO) { engine.version() == null }
+            if (!downloaded || broken) {
+                if (broken) slog("engine lama tidak jalan di rootfs baru, mengunduh ulang…")
                 slog("mengunduh opencode (±60 MB)…")
                 var last = -1
                 val v = engine.installLatest(
@@ -220,6 +231,9 @@ fun MainScreen() {
             serverVersion = runCatching { OpenCodeClient(port = port, password = password).health().version }.getOrNull()
             status = Status.JALAN
             runCatching { EngineService.start(ctx, port, serverVersion ?: "?") }
+            if (bridgeEnabled) {
+                engine.startBridge(bridgePort, port, password)
+            }
         } else if (SecureStore.getBool(ctx, KEY_AUTOBOOT, false)) {
             boot()
         }
@@ -272,6 +286,8 @@ fun MainScreen() {
                 Tab.SERVER -> ServerTab(
                     status = status,
                     port = port,
+                    bridgeEnabled = bridgeEnabled,
+                    bridgePort = bridgePort,
                     serverVersion = serverVersion,
                     uptimeMs = uptimeMs,
                     statusLine = statusLine,
@@ -287,6 +303,8 @@ fun MainScreen() {
                     running = status == Status.JALAN,
                     autoboot = autoboot,
                     autoUpdate = autoUpdate,
+                    bridgeEnabled = bridgeEnabled,
+                    bridgePort = bridgePort,
                     onPasswordChange = { password = it; persist() },
                     onPortChange = { p -> port = p; persist() },
                     onRandomPassword = { password = randomPassword(); persist() },
@@ -299,6 +317,8 @@ fun MainScreen() {
                     },
                     onAutobootChange = { b -> autoboot = b; SecureStore.setBool(ctx, KEY_AUTOBOOT, b) },
                     onAutoUpdateChange = { b -> autoUpdate = b; SecureStore.setBool(ctx, KEY_AUTO_UPDATE, b) },
+                    onBridgeEnabledChange = { b -> bridgeEnabled = b; SecureStore.setBridgeEnabled(ctx, b) },
+                    onBridgePortChange = { p -> bridgePort = p; SecureStore.setBridgePort(ctx, p) },
                 )
             }
         }
@@ -319,6 +339,8 @@ fun MainScreen() {
 private fun ColumnScope.ServerTab(
     status: Status,
     port: Int,
+    bridgeEnabled: Boolean,
+    bridgePort: Int,
     serverVersion: String?,
     uptimeMs: Long,
     statusLine: String?,
@@ -365,9 +387,9 @@ private fun ColumnScope.ServerTab(
                 Spacer(Modifier.height(4.dp))
                 Text(
                     if (status == Status.JALAN) {
-                        "http://0.0.0.0:$port — bagikan lewat Tailscale/Wi-Fi"
+                        "http://0.0.0.0:$port — Web UI (buka dari browser)"
                     } else {
-                        "Access: http://127.0.0.1:$port (di HP ini)"
+                        "Web UI: http://127.0.0.1:$port (di HP ini)"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -375,6 +397,43 @@ private fun ColumnScope.ServerTab(
             }
             TextButton(onClick = { onCopy("http://127.0.0.1:$port") }) {
                 Text("Salin", modifier = Modifier.heightIn(min = 48.dp))
+            }
+        }
+    }
+
+    if (bridgeEnabled) {
+        ClayCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (status == Status.JALAN) "http://127.0.0.1:$bridgePort/v1" else "—",
+                            style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        if (status == Status.JALAN) {
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "OpenAI API",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (status == Status.JALAN) {
+                            "http://0.0.0.0:$bridgePort/v1 — untuk Cursor, Cline, Continue, dll."
+                        } else {
+                            "OpenAI Endpoint: http://127.0.0.1:$bridgePort/v1"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                TextButton(onClick = { onCopy("http://127.0.0.1:$bridgePort/v1") }) {
+                    Text("Salin", modifier = Modifier.heightIn(min = 48.dp))
+                }
             }
         }
     }
@@ -483,7 +542,11 @@ private fun ColumnScope.LogTab(
         logText = withContext(Dispatchers.IO) {
             val f = engine.logFile()
             runCatching {
-                if (f.isFile) f.readLines().takeLast(400).joinToString("\n") else "(log kosong)"
+                // Full log, tanpa dipotong: debugging sering butuh bagian awal
+                // (stack trace / pesan proot) yang `takeLast(N)` buang.
+                // shortcut: serve.log tanpa rotasi — kalau filenya pernah tembus
+                // ratusan MB, ganti jadi baca mundur N byte terakhir.
+                if (f.isFile) f.readLines().joinToString("\n") else "(log kosong)"
             }.getOrDefault("(log tidak terbaca)")
         }
     }
@@ -537,6 +600,8 @@ private fun ColumnScope.SettingsTab(
     running: Boolean,
     autoboot: Boolean,
     autoUpdate: Boolean,
+    bridgeEnabled: Boolean,
+    bridgePort: Int,
     onPasswordChange: (String) -> Unit,
     onPortChange: (Int) -> Unit,
     onRandomPassword: () -> Unit,
@@ -544,6 +609,8 @@ private fun ColumnScope.SettingsTab(
     onGitPatChange: (String) -> Unit,
     onAutobootChange: (Boolean) -> Unit,
     onAutoUpdateChange: (Boolean) -> Unit,
+    onBridgeEnabledChange: (Boolean) -> Unit,
+    onBridgePortChange: (Int) -> Unit,
 ) {
     Text(
         "Pengaturan",
@@ -621,6 +688,49 @@ private fun ColumnScope.SettingsTab(
         ) {
             Text("Mulai otomatis saat app dibuka", modifier = Modifier.weight(1f))
             Switch(checked = autoboot, onCheckedChange = onAutobootChange)
+        }
+    }
+
+    ClayCard {
+        ClaySectionTitle("OpenAI-compatible Endpoint")
+        Text(
+            "Mengizinkan aplikasi luar (Cursor, Cline, Continue.dev, LibreChat, dll.) " +
+                "mengakses AI melalui endpoint OpenAI /v1/chat/completions standar.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .selectable(selected = bridgeEnabled) { onBridgeEnabledChange(!bridgeEnabled) }
+                .heightIn(min = 48.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Aktifkan OpenAI API Bridge", modifier = Modifier.weight(1f))
+            Switch(checked = bridgeEnabled, onCheckedChange = onBridgeEnabledChange)
+        }
+        if (bridgeEnabled) {
+            Spacer(Modifier.height(8.dp))
+            var bridgePortText by remember(bridgePort) { mutableStateOf(bridgePort.toString()) }
+            OutlinedTextField(
+                value = bridgePortText,
+                onValueChange = { s ->
+                    bridgePortText = s
+                    s.toIntOrNull()?.takeIf { it in 1024..65535 }?.let(onBridgePortChange)
+                },
+                label = { Text("Port OpenAI API (1024–65535)") },
+                isError = bridgePortText.toIntOrNull()?.let { it in 1024..65535 } == false,
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (running) {
+                Text(
+                    "Perubahan port/status bridge berlaku setelah server di-restart.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
         }
     }
 
